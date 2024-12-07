@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+def run_command(command, cwd=None):
+    """
+    Run a shell command and print output/errors.
+    """
+    try:
+        result = subprocess.run(command, shell=True, cwd=cwd, check=True, text=True)
+        print(f"Command succeeded: {command}")
+    except subprocess.CalledProcessError as e:
+        print(f"Command failed: {command}\nError: {e}")
+
+def get_github_handle():
+    """
+    Retrieve the GitHub handle using the GitHub CLI or an environment variable.
+    """
+    # Attempt to retrieve the handle using the GitHub CLI
+    try:
+        result = subprocess.run(
+            ["gh", "api", "user", "--jq", ".login"],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        print("Warning: Could not retrieve GitHub handle using the GitHub CLI.")
+    
+    # Fall back to using the environment variable
+    github_handle = os.getenv("GITHUB_HANDLE")
+    if github_handle:
+        return github_handle
+
+    print("Error: GitHub handle could not be determined.")
+    print("Ensure the GitHub CLI is installed and authenticated, or set the GITHUB_HANDLE environment variable.")
+    sys.exit(1)
+
+def create_local_directory(project_name):
+    """
+    Create the project directory in ~/projects.
+    """
+    base_dir = Path.home() / "projects"
+    project_dir = base_dir / project_name
+
+    if project_dir.exists():
+        print(f"Error: Directory {project_dir} already exists.")
+        return None
+    
+    print(f"Creating project directory at {project_dir}...")
+    project_dir.mkdir(parents=True)
+    return project_dir
+
+def add_initial_files(project_dir, project_name):
+    """
+    Add .gitignore, requirements.txt, README.md, and initialize venv.
+    """
+    # Create .gitignore
+    with open(project_dir / ".gitignore", "w") as f:
+        f.write(".venv\n")
+
+    # Create requirements.txt
+    (project_dir / "requirements.txt").touch()
+
+    # Create README.md
+    with open(project_dir / "README.md", "w") as f:
+        f.write(f"# {project_name}\n\n")
+        f.write("## Quick Start\n\n")
+        f.write("Instructions on getting started with the project.\n\n")
+        f.write("## Prerequisites\n\n")
+        f.write("Dependencies and setup instructions go here.\n\n")
+    
+    # Initialize virtual environment
+    print("Creating virtual environment...")
+    run_command("python3 -m venv .venv", cwd=project_dir)
+
+def initialize_git_and_push(project_dir, project_name):
+    """
+    Initialize git, create a remote repo, and push the initial commit.
+    """
+    github_handle = get_github_handle()
+
+    # Initialize git locally
+    print("Initializing git...")
+    run_command("git init", cwd=project_dir)
+
+    # Add all files
+    run_command("git add .", cwd=project_dir)
+
+    # Create an initial commit
+    run_command('git commit -m "Initial commit"', cwd=project_dir)
+
+    # Create a remote GitHub repository using the GitHub CLI (gh)
+    print("Creating remote GitHub repository using GitHub CLI...")
+    run_command(f"gh repo create {project_name} --private --source . --remote origin --confirm", cwd=project_dir)
+
+    # Set default branch to main
+    run_command("git branch -M main", cwd=project_dir)
+
+    # Push to remote repository
+    run_command("git push -u origin main", cwd=project_dir)
+
+    # Return the GitHub repository URL
+    return f"https://github.com/{github_handle}/{project_name}"
+
+def open_vscode_and_activate_venv(project_dir):
+    """
+    Open the project in VS Code, open the integrated terminal,
+    navigate to the project directory, and activate the virtual environment.
+    """
+    print("Opening VS Code...")
+    # Open the project directory in VS Code
+    run_command(f"code {project_dir}")
+
+    print("Setting up the VS Code terminal...")
+    activate_venv_command = f"""
+    echo 'Activating virtual environment...' &&
+    cd "{project_dir}" &&
+    source .venv/bin/activate
+    """
+    run_command(f"code --add {project_dir} --command workbench.action.terminal.newInActiveWorkspace")
+
+def main():
+    """
+    Main function to scaffold a project.
+    """
+    # Check if the project name was provided
+    if len(sys.argv) < 2:
+        print("Usage: new_project <project-name>")
+        sys.exit(1)
+
+    project_name = sys.argv[1].strip()
+
+    if not project_name:
+        print("Error: Project name cannot be empty.")
+        sys.exit(1)
+
+    # Step 1: Create the local directory
+    project_dir = create_local_directory(project_name)
+    if not project_dir:
+        sys.exit(1)
+
+    # Step 2: Add initial files
+    add_initial_files(project_dir, project_name)
+
+    # Step 3: Initialize Git and push to GitHub
+    repo_url = initialize_git_and_push(project_dir, project_name)
+
+    # Step 4: Open in VS Code
+    open_vscode_and_activate_venv(project_dir)
+
+    # Step 5: Display the GitHub repository URL
+    print(f"Project '{project_name}' has been successfully scaffolded!")
+    print(f"GitHub repository URL: {repo_url}")
+
+if __name__ == "__main__":
+    main()
